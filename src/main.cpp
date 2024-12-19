@@ -1,3 +1,6 @@
+// This project is done by Phakphum Artkaew, Tianyu Gao, and Luna Liu
+// Please read README.md in root directory
+
 #include "mbed.h"
 #include "drivers/LCD_DISCO_F429ZI.h"
 
@@ -12,6 +15,7 @@
 #define DATA_READY_FLAG 2
 
 #define SCALING_FACTOR (17.5f * 0.0174532925199432957692236907684886f / 1000.0f)
+#define ALPHA 0.2f  // Smoothing factor: lower = more smoothing
 
 EventFlags flags;
 
@@ -44,6 +48,7 @@ static const int MAX_SAMPLES=RECORD_DURATION/SAMPLE_INTERVAL_MS;
 
 float key_gesture_x[MAX_SAMPLES], key_gesture_y[MAX_SAMPLES];
 float test_gesture_x[MAX_SAMPLES], test_gesture_y[MAX_SAMPLES];
+float filtered_gx = 0.0f, filtered_gy = 0.0f, filtered_gz = 0.0f;
 
 //Workflow states
 enum State{
@@ -70,7 +75,10 @@ void init_gyro(){
     spi.transfer(write_buf, 2, read_buf, 2, spi_cb);
     flags.wait_all(SPI_FLAG);
 }
-
+// Low-pass filter function
+float low_pass_filter(float raw, float prev_filtered) {
+    return ALPHA * raw + (1 - ALPHA) * prev_filtered;
+}
 void read_gyro(){
     write_buf[0] = OUT_X_L | 0x80 | 0x40;
     spi.transfer(write_buf, 7, read_buf, 7, spi_cb);
@@ -83,6 +91,14 @@ void read_gyro(){
     gx = raw_gx * SCALING_FACTOR;
     gy = raw_gy * SCALING_FACTOR;
     gz = raw_gz * SCALING_FACTOR;
+    // Apply low-pass filter to smooth the data
+    filtered_gx = low_pass_filter(gx, filtered_gx);
+    filtered_gy = low_pass_filter(gy, filtered_gy);
+    filtered_gz = low_pass_filter(gz, filtered_gz);
+
+    gx = filtered_gx;
+    gy = filtered_gy;
+    gz = filtered_gz;
 }
 
 //Display a message
@@ -93,7 +109,43 @@ void display_message(const char* msg, uint32_t color){
     lcd.SetFont(&Font16);
     lcd.DisplayStringAt(0, LINE(5), (uint8_t*)msg, CENTER_MODE);
 }
+void DrawChristmasTree() {
+    // Clear the screen
+    lcd.Clear(LCD_COLOR_BLACK);
 
+    // Tree parameters
+    uint16_t trunkWidth = 20;
+    uint16_t trunkHeight = 40;
+    uint16_t trunkX = lcd.GetXSize() / 2 - trunkWidth / 2;
+    uint16_t trunkY = lcd.GetYSize() - trunkHeight - 60;  // Adjusted for text space
+
+    uint16_t treeBaseWidth = 120;
+    uint16_t treeHeight = 150;
+    uint16_t treeX = lcd.GetXSize() / 2;
+    uint16_t treeY = trunkY - treeHeight;
+
+    // Draw the trunk
+    lcd.SetTextColor(LCD_COLOR_BROWN);
+    lcd.FillRect(trunkX, trunkY, trunkWidth, trunkHeight);
+
+    // Draw the tree (triangle)
+    lcd.SetTextColor(LCD_COLOR_GREEN);
+    for (int h = 0; h <= treeHeight; h++) {
+        int width = (treeBaseWidth * h) / treeHeight;
+        lcd.DrawHLine(treeX - width / 2, treeY + h, width);
+    }
+
+    // Draw the star on top of the tree
+    uint16_t starX = treeX;
+    uint16_t starY = treeY - 10;
+    lcd.SetTextColor(LCD_COLOR_YELLOW);
+    lcd.FillCircle(starX, starY, 8);
+
+    // Display "Success" message below the tree
+    lcd.SetTextColor(LCD_COLOR_WHITE);
+    lcd.SetBackColor(LCD_COLOR_BLACK);
+    lcd.DisplayStringAt(0, lcd.GetYSize() - 40, (uint8_t *)"SUCCESS!", CENTER_MODE);
+}
 //DTW function
 //We only detect movements along x-y plane
 float dtw_distance(const float* seq1x, const float* seq1y, int len1, const float* seq2x, const float* seq2y, int len2){
@@ -229,7 +281,7 @@ int main() {
                     thread_sleep_for(1000);
 
                     if (success) {
-                        display_message("Success", LCD_COLOR_GREEN);
+                        DrawChristmasTree();
                         thread_sleep_for(3000);
                         display_message("Push to Recognize", LCD_COLOR_WHITE);
                         state=WAIT_FOR_RECOGNIZE;
